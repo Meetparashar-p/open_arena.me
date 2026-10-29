@@ -1,0 +1,173 @@
+# Open Model Arena
+
+> Blind, cost-aware model comparison for any OpenAI-compatible endpoint. Self-hosted. ELO leaderboard. Live streaming.
+
+[![CI](https://github.com/pete-builds/open-model-arena/actions/workflows/ci.yml/badge.svg)](https://github.com/pete-builds/open-model-arena/actions/workflows/ci.yml)
+[![Docs](https://github.com/pete-builds/open-model-arena/actions/workflows/docs.yml/badge.svg)](https://pete-builds.github.io/open-model-arena/)
+[![Release](https://img.shields.io/github/v/release/pete-builds/open-model-arena?display_name=tag&sort=semver)](https://github.com/pete-builds/open-model-arena/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Container](https://img.shields.io/badge/ghcr.io-open--model--arena-blue?logo=docker)](https://github.com/pete-builds/open-model-arena/pkgs/container/open-model-arena)
+[![Python](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
+
+📖 **[Read the docs](https://pete-builds.github.io/open-model-arena/)** for guides on eval suites, LLM-as-judge, headless API, deployment, and the threat model.
+
+**Bring your own models. Run blind battles.**
+
+![Arena](docs/screenshots/demo.gif)
+
+If you're running your own AI stack -- Ollama on a Mac Mini, models on a GPU server, llama.cpp on bare metal, vLLM in a container -- you've probably wondered how your local models actually compare to the cloud APIs you're paying for. Open Model Arena gives you a way to find out.
+
+Two models get the same prompt. You read both responses without knowing which model wrote which. You vote. ELO rankings track the results over time. That's it.
+
+**What makes this different from public leaderboards:** those benchmarks test their models with their prompts on their hardware. They don't tell you how Mistral 7B running on your Mac Mini compares to GPT-4o for the prompts your team actually uses. Open Model Arena runs on your infrastructure, with your models, your prompts, and your data. A $0 local model and a $15/million-token cloud API get the same blind evaluation.
+
+**How is this different from Chatbot Arena?** [Chatbot Arena](https://lmarena.ai/) (LMSYS) is a research platform that published its code. Running it yourself means installing FastChat, Gradio, and a full inference serving framework. It's designed to serve models, not connect to ones you already have. Open Model Arena is a self-hosted tool designed to be deployed. One Docker container, one YAML file, no inference framework required. If your models are already running on Ollama, behind an API, or through a gateway, you're five minutes from your first blind battle.
+
+## Who is this for?
+
+- **Homelab and self-hosted AI users** running Ollama, LM Studio, vLLM, or LocalAI who want to benchmark their local models against cloud APIs
+- **Teams evaluating models** for internal use who need blind comparisons on their own prompts, not public benchmarks
+- **Anyone with an OpenAI-compatible endpoint** -- cloud providers, local inference, API gateways, proxies, or a mix of all of them
+
+## Features
+
+**The core:**
+- **Blind comparison** -- models are hidden until after you vote, so the response speaks for itself
+- **Targeted comparison** -- skip the mystery match and pick two specific models to go head-to-head, or pick one and let the arena draw its opponent
+- **Thinking selector** -- choose off / low / medium / high per battle; sent as `reasoning_effort`, with the thinking trace streamed into a collapsible block when the provider returns one
+- **Audience vote** -- open a poll on any finished battle, put the QR code on the projector, and let a room full of phones decide. The plurality becomes the recorded vote, and the phones see the reveal when you close it
+- **Real-time streaming** -- both responses stream simultaneously via Server-Sent Events
+- **ELO leaderboard** -- standard rating system (K=32), filterable by category, with provisional thresholds
+
+**Everything else:**
+- Category support (general, coding, reasoning, creative)
+- Per-response cost tracking based on model pricing config
+- Vote audit log with before/after ELO for every vote
+- Markdown rendering with syntax highlighting
+- Prompt templates saved to localStorage
+- Battle export (CSV or JSON)
+- Dark/light theme
+
+## Quick Start
+
+```bash
+git clone https://github.com/pete-builds/open-model-arena.git
+cd open-model-arena
+cp models.yaml.example models.yaml
+cp .env.example .env
+
+# Edit models.yaml with your API endpoints and keys
+# Edit .env with a passphrase and a random token secret:
+#   ARENA_PASSPHRASE=your-secret-phrase
+#   AUTH_TOKEN_SECRET=$(openssl rand -hex 32)
+
+# Pulls the pinned image from GHCR (the pin moves with each release).
+docker compose up -d
+
+# Or build from source (for hacking on the app):
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+```
+
+Open `http://localhost:3694`
+
+**HTTPS note:** Auth cookies use `Secure=True`, which requires HTTPS. This works automatically on `localhost`. For remote access, use any HTTPS-capable reverse proxy (nginx, Caddy, Cloudflare Tunnel, Tailscale Funnel, etc.).
+
+## Configuration
+
+### models.yaml
+
+Define your providers and models in YAML. See `models.yaml.example` for the full format.
+
+```yaml
+providers:
+  my-gateway:
+    base_url: "https://your-api-gateway.com/v1"
+    api_key_env: "GATEWAY_API_KEY"  # reads from environment
+    timeout: 30
+
+  local-ollama:
+    base_url: "http://localhost:11434/v1"
+    api_key: "ollama"
+    timeout: 120
+    local: true                     # prevents pairing two local models
+
+models:
+  - id: gpt-4o
+    provider: my-gateway
+    display_name: "GPT-4o"
+    model_id: "gpt-4o"
+    input_cost_per_1m: 2.5
+    output_cost_per_1m: 10.0
+    categories: [general, coding, reasoning, creative]
+    enabled: true
+```
+
+- `api_key_env` reads the key from an environment variable (recommended)
+- `api_key` sets the key directly (for local services like Ollama)
+- `categories` controls which battles a model can appear in
+- Set `enabled: false` to temporarily remove a model
+- `reasoning` is optional: `true` means the model accepts `reasoning_effort`, `false` means never send it, and leaving it out means the arena tries it and falls back to a plain call if the provider returns a 400
+- Models are randomly paired; the system avoids pairing two local models together
+
+### Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `ARENA_PASSPHRASE` | Yes | Passphrase users enter to access the arena |
+| `AUTH_TOKEN_SECRET` | Yes | Secret key for signing auth tokens (`openssl rand -hex 32`) |
+| `GATEWAY_API_KEY` | No | API key for your gateway provider |
+| `COOKIE_SECURE` | No | Set to `false` only when serving plain HTTP on a LAN; the login cookie is otherwise dropped by the browser (default: `true`) |
+| `TRUSTED_PROXIES` | No | Comma-separated proxy IPs/CIDRs whose `X-Forwarded-For` is honored for rate limiting |
+| `TZ` | No | Timezone for "battles today" stat (default: `America/New_York`) |
+
+The app will refuse to start without `ARENA_PASSPHRASE` and `AUTH_TOKEN_SECRET`.
+
+## Tech Stack
+
+- **Backend:** Python / FastAPI
+- **AI Client:** OpenAI SDK (works with any OpenAI-compatible API)
+- **Streaming:** Server-Sent Events (SSE)
+- **Database:** SQLite with WAL mode
+- **Frontend:** Vanilla JS + ES modules (no build step)
+- **Container:** Docker
+
+## API
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/battle` | Start a battle (`model_a`, `model_b`, `reasoning_effort` optional) |
+| `GET` | `/api/battle/{id}/stream` | SSE stream (answer tokens plus `*_thinking` events) |
+| `POST` | `/api/battle/{id}/vote` | Cast a vote |
+| `POST` | `/api/battle/{id}/poll` | Open an audience poll; `GET` for the live tally; `POST .../close` to record the plurality |
+| `GET` | `/vote/{code}` | Public phone page for an audience poll (`/api/audience/{code}` behind it) |
+| `GET` | `/api/leaderboard?category=overall` | ELO rankings |
+| `GET` | `/api/models` | List enabled models |
+| `GET` | `/api/export?format=csv` | Download battle history |
+| `GET` | `/healthz` | Health check |
+
+## Roadmap
+
+The next tranche of work is aimed at teams codifying real evals, not just
+running one-off battles. See [`docs/SHOWCASE-PLAN.md`](docs/SHOWCASE-PLAN.md)
+for the full plan. Headline features on deck:
+
+- **Eval suites** — YAML-defined prompt sets, batch runs, suite-scoped leaderboards
+- **LLM-as-judge** — auto-vote using a designated judge model with human override
+- **Cost dashboard** — spend by model, cost-per-ELO-point, cheapest-above-threshold
+- **API tokens** — headless suite runs from CI
+- **Prometheus `/metrics`** — battles, votes, latency, cost
+- **Battle permalinks** — shareable URL for team review
+
+## Contributing + Security
+
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — dev loop, PR expectations, test norms
+- [`SECURITY.md`](SECURITY.md) — private advisory flow
+- [`CHANGELOG.md`](CHANGELOG.md) — Keep a Changelog + SemVer
+
+## Prior Art
+
+Inspired by [Chatbot Arena](https://lmarena.ai/) (LMSYS), which pioneered blind model comparison at scale. Open Model Arena brings that concept to self-hosted infrastructure for teams and individuals who want to evaluate models privately.
+
+## License
+
+MIT

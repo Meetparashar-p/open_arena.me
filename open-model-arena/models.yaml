@@ -1,0 +1,26 @@
+categories:
+  - general
+  - coding
+  - reasoning
+
+providers:
+  groq:
+    base_url: "https://api.groq.com/openai/v1"
+    api_key_env: "GROQ_API_KEY"
+    timeout: 120
+
+models:
+  - id: gpt-oss-120b
+    provider: groq
+    display_name: "GPT-OSS 120B"
+    model_id: "openai/gpt-oss-120b"
+    reasoning: true
+    categories: [general, coding, reasoning]
+    enabled: true
+
+  - id: qwen38-27b
+    provider: groq
+    display_name: "Qwen 3.8 27B"
+    model_id: "qwen/qwen3.8-27b"
+    categories: [general, coding, reasoning]
+    enabled: true
